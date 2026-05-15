@@ -43,6 +43,8 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
 
+import os, json, tempfile
+
 
 # ════════════════════════════════════════════════════════════════════
 #  CONFIG
@@ -56,6 +58,12 @@ st.set_page_config(
 )
 
 CORPUS_PATH = 'results_fdi_pairs.csv'
+
+if 'gcp_service_account' in st.secrets:
+    sa_path = os.path.join(tempfile.gettempdir(), 'sa.json')
+    with open(sa_path, 'w') as f:
+        json.dump(dict(st.secrets['gcp_service_account']), f)
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = sa_path
 
 # ─── LFI lexicons ─────────────────────────────────────────────
 LFI_LEXICONS = {
