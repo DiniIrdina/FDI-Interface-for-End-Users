@@ -192,50 +192,68 @@ def _tokenize(text):
     return re.findall(r"\b[a-z][a-z'-]+\b", text.lower())
 
 
-def compute_L(text_1, text_2, topic):
+def compute_L(text_1, text_2, topic, nlp=None):
     """
-    Words (L) — lexical framing divergence.
-    For each article, compute the normalised share of frame_a vs frame_b
-    lexicon hits. L = |article_1_lfi - article_2_lfi|.
-    Returns L_raw + per-article hit spans for highlighting.
+    Words (L) — lexical framing divergence with lemma-based matching.
+    Falls back to exact matching if spaCy is unavailable.
     """
     if topic not in LFI_LEXICONS:
         return None, [[], []], ('', '')
     lex = LFI_LEXICONS[topic]
     frame_a_name, frame_b_name = list(lex.keys())
-    frame_a_words = {w.lower() for w in lex[frame_a_name]}
-    frame_b_words = {w.lower() for w in lex[frame_b_name]}
 
-    def article_lfi(text):
-        tokens = _tokenize(text)
-        n = max(len(tokens), 1)
-        a = sum(1 for t in tokens if t in frame_a_words) / n
-        b = sum(1 for t in tokens if t in frame_b_words) / n
-        return a - b  # +ve toward frame_a
+    # ── Build the lemma sets from the lexicons ───────────────
+    if nlp is not None:
+        def lemmatise_lex(words):
+            lemmas = set()
+            for w in words:
+                doc = nlp(w.lower())
+                for tok in doc:
+                    if tok.is_alpha:
+                        lemmas.add(tok.lemma_.lower())
+            return lemmas
+        frame_a_set = lemmatise_lex(lex[frame_a_name])
+        frame_b_set = lemmatise_lex(lex[frame_b_name])
+    else:
+        # Exact-form fallback
+        frame_a_set = {w.lower() for w in lex[frame_a_name]}
+        frame_b_set = {w.lower() for w in lex[frame_b_name]}
 
-    L_raw = abs(article_lfi(text_1) - article_lfi(text_2))
+    # ── Process each article once: count + collect hit spans ──
+    def process(text):
+        if nlp is not None:
+            doc = nlp(text)
+            tokens = [tok for tok in doc if tok.is_alpha]
+            n = max(len(tokens), 1)
+            a_count = b_count = 0
+            hits = []
+            for tok in tokens:
+                key = tok.lemma_.lower()
+                if key in frame_a_set:
+                    a_count += 1
+                    hits.append((tok.idx, tok.idx + len(tok.text),
+                                 tok.text, frame_a_name))
+                elif key in frame_b_set:
+                    b_count += 1
+                    hits.append((tok.idx, tok.idx + len(tok.text),
+                                 tok.text, frame_b_name))
+            return (a_count - b_count) / n, hits
+        else:
+            tokens = re.findall(r"\b[a-z][a-z'-]+\b", text.lower())
+            n = max(len(tokens), 1)
+            a = sum(1 for t in tokens if t in frame_a_set) / n
+            b = sum(1 for t in tokens if t in frame_b_set) / n
+            hits = []
+            for w in list(frame_a_set) + list(frame_b_set):
+                for m in re.finditer(r'\b' + re.escape(w) + r'\b',
+                                     text, re.IGNORECASE):
+                    frame = frame_a_name if w in frame_a_set else frame_b_name
+                    hits.append((m.start(), m.end(), m.group(), frame))
+            return a - b, hits
 
-    # Hit spans for highlighting (each: (start, end, surface, frame_name))
-    def find_hits(text):
-        hits = []
-        all_words = list(frame_a_words) + list(frame_b_words)
-        for w in all_words:
-            pattern = r'\b' + re.escape(w) + r'\b'
-            for m in re.finditer(pattern, text, re.IGNORECASE):
-                frame = frame_a_name if w in frame_a_words else frame_b_name
-                hits.append((m.start(), m.end(), m.group(), frame))
-        # Deduplicate by span (some words may appear in both lexicons)
-        seen = set()
-        deduped = []
-        for h in hits:
-            key = (h[0], h[1])
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(h)
-        return deduped
-
-    return L_raw, [find_hits(text_1), find_hits(text_2)], (frame_a_name, frame_b_name)
+    lfi_1, hits_1 = process(text_1)
+    lfi_2, hits_2 = process(text_2)
+    return abs(lfi_1 - lfi_2), [hits_1, hits_2], (frame_a_name, frame_b_name)
 
 
 def _extract_entities_spacy(text, nlp, types=('PERSON', 'GPE', 'ORG', 'LOC')):
@@ -308,7 +326,7 @@ def compute_all_indicators(text_1, text_2, topic, _nlp_marker, _google_marker):
     nlp = load_spacy()
     client = load_google_client()
 
-    L_raw, L_hits, frame_names = compute_L(text_1, text_2, topic)
+    L_raw, L_hits, frame_names = compute_L(text_1, text_2, topic, nlp)
     C_raw, ents_1, ents_2, uniq_1, uniq_2 = compute_C(text_1, text_2, nlp)
     E_raw, E_deltas = compute_E(text_1, text_2, client)
 
