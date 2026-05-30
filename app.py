@@ -129,31 +129,6 @@ LFI_LEXICONS = {
     }
 }
 
-# ─── User-facing copy ─────────────────────────────────────────
-INDICATOR_INFO = {
-    'L': {
-        'name': 'Words',
-        'description': 'How loaded is the language?',
-        'low_msg':  'Similar word choices',
-        'mid_msg':  'Some loaded-word differences',
-        'high_msg': 'Very different loaded vocabulary',
-    },
-    'E': {
-        'name': 'People',
-        'description': 'How are the same people described?',
-        'low_msg':  'Same people described similarly',
-        'mid_msg':  'Some differences in how people are described',
-        'high_msg': 'Same people described very differently',
-    },
-    'C': {
-        'name': 'Facts',
-        'description': "What's covered vs left out?",
-        'low_msg':  'Cover similar facts',
-        'mid_msg':  'Some coverage differences',
-        'high_msg': 'Cover very different facts',
-    },
-}
-
 # ─── User-facing copy (Flesch-Kincaid Grade ≤ 10) ─────────────
 INDICATOR_INFO = {
     'L': {
@@ -504,13 +479,22 @@ def score_card(col, code, value, percentile, headline_top_code=None):
         sentence = (f'About <b>{pct}%</b> of the loaded words in these '
                     f'articles are different.')
     elif code == 'E':
-        sentence = (f'Shared people are described with sentiment scores '
-                    f'<b>{value:.2f}</b> points apart on average '
-                    f'(scale: −1 to +1).')
+        if percentile is not None and percentile >= 66:
+            sentence = (f'The way these articles describe shared people '
+                        f'differs more than <b>{int(percentile)}%</b> of '
+                        f'article pairs we studied. (Average sentiment '
+                        f'gap: <b>{value:.2f}</b> on a −1 to +1 scale.)')
+        else:
+            sentence = (f'Shared people are described with sentiment scores '
+                        f'<b>{value:.2f}</b> points apart on average '
+                        f'(scale: −1 to +1).')
     elif code == 'C':
         shared_pct = int(round((1 - value) * 100))
-        sentence = (f'The two articles only mention <b>{shared_pct}%</b> '
-                    f'of the same people and places.')
+        diff_pct = 100 - shared_pct
+        sentence = (f'Out of all the people and places mentioned across '
+                    f'both articles, <b>{shared_pct}%</b> appear in both. '
+                    f'The other <b>{diff_pct}%</b> are only in one or '
+                    f'the other.')
     else:
         sentence = ''
  
@@ -801,6 +785,28 @@ score_card(c1, 'L', results['L']['value'], percentiles['L'], top_code)
 score_card(c2, 'E', results['E']['value'], percentiles['E'], top_code)
 score_card(c3, 'C', results['C']['value'], percentiles['C'], top_code)
  
+# Entity counts: makes the Facts score concrete by showing how many
+# unique people / places / organisations each article mentions.
+if results['C']['value'] is not None:
+    ents_1_set = {e[2].lower().strip() for e in results['C']['ents_1']}
+    ents_2_set = {e[2].lower().strip() for e in results['C']['ents_2']}
+    n1 = len(ents_1_set)
+    n2 = len(ents_2_set)
+    shared = len(ents_1_set & ents_2_set)
+    st.caption(
+        f'**{outlet_1}** mentions {n1} distinct people and places · '
+        f'**{outlet_2}** mentions {n2} · Only **{shared}** are in both.'
+    )
+ 
+# A note about the People scale, shown only when E is in the red band
+if percentiles['E'] is not None and percentiles['E'] >= 66:
+    st.caption(
+        '💡 The People scale is sensitive — most news articles describe '
+        'shared people very consistently, so even small numbers (like '
+        '0.05) can be unusual. We compare your pair against the article '
+        'pairs we studied to decide what counts as a large difference.'
+    )
+ 
  
 # ─── Step 3: radar profile ────────────────────────────────────
 st.subheader('3. Profile')
@@ -860,4 +866,3 @@ st.markdown('---')
 st.caption('Framing Divergence Explorer · proof-of-concept prototype · '
            'Built on the FDI Indicators framework (Ubaidah, 2026, Masters '
            'thesis, Monash University).')
- 
