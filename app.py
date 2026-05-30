@@ -3,67 +3,75 @@ Framing Divergence Explorer — Streamlit application
 ====================================================
 Compare how two news articles frame the same event, using three
 interpretable indicators: Words (L), People (E), Facts (C).
-
+ 
 Run with:
     streamlit run app.py
-
+ 
 Setup:
     pip install -r requirements.txt
     python -m spacy download en_core_web_sm
-
+ 
 Optional: set GOOGLE_APPLICATION_CREDENTIALS to a service-account JSON
 to enable the "People" (entity sentiment) indicator.
 """
-
+ 
+import streamlit as st
+ 
+# ─── Streamlit Cloud credentials handler ─────────────────────
+# When deployed on Streamlit Community Cloud, read the Google
+# service-account JSON from st.secrets and write it to a temp file
+# so the Google client library can find it. No-op when run locally
+# (st.secrets won't contain 'gcp_service_account' on a laptop).
+import os
+import json
+import tempfile
+if 'gcp_service_account' in st.secrets:
+    sa_path = os.path.join(tempfile.gettempdir(), 'sa.json')
+    with open(sa_path, 'w') as f:
+        json.dump(dict(st.secrets['gcp_service_account']), f)
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = sa_path
+ 
+# ─── Other imports ───────────────────────────────────────────
 import re
 from pathlib import Path
-
+ 
 import numpy as np
 import pandas as pd
-import streamlit as st
 import plotly.graph_objects as go
-
-
-# ─── Optional dependencies (graceful degradation) ─────────────
+ 
+# ─── Optional dependencies (graceful degradation) ────────────
 try:
     import spacy
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
-
+ 
 try:
     from google.cloud import language_v1
     GOOGLE_AVAILABLE = True
 except ImportError:
     GOOGLE_AVAILABLE = False
-
+ 
 try:
     from scipy import stats
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-
-import os, json, tempfile
-
-
+ 
+ 
 # ════════════════════════════════════════════════════════════════════
 #  CONFIG
 # ════════════════════════════════════════════════════════════════════
-
+ 
 st.set_page_config(
     page_title='Framing Divergence Explorer',
     page_icon='📰',
     layout='wide',
     initial_sidebar_state='expanded',
 )
-
+ 
 CORPUS_PATH = 'results_fdi_pairs.csv'
-
-if 'gcp_service_account' in st.secrets:
-    sa_path = os.path.join(tempfile.gettempdir(), 'sa.json')
-    with open(sa_path, 'w') as f:
-        json.dump(dict(st.secrets['gcp_service_account']), f)
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = sa_path
+ARTICLES_PATH = 'articles.csv'
 
 # ─── LFI lexicons ─────────────────────────────────────────────
 LFI_LEXICONS = {
